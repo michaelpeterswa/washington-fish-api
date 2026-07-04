@@ -1,12 +1,21 @@
 ---
 services:
-  main:
+  api:
     build: .
+    command: ["/wfa-api"]
     ports:
-      - "8081:8081"
+      - "8080:8080" # HTTP API
+      - "8081:8081" # metrics
+    depends_on:
+      postgis:
+        condition: service_healthy
     environment:
       # logging
       LOG_LEVEL: "info"
+
+      # api
+      API_PORT: "8080"
+      DATABASE_URL: "postgres://wfa:wfa@postgis:5432/wfa?sslmode=disable"
 
       # metrics
       METRICS_ENABLED: "true"
@@ -17,13 +26,29 @@ services:
       # tracing
       TRACING_ENABLED: "false"
       TRACING_SAMPLERATE: "1.0"
-      TRACING_SERVICE: "go-start"
+      TRACING_SERVICE: "washington-fish-api"
       TRACING_VERSION: "0.0.1"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://lgtm:4317"
 
       # grpc (otlp tracing)
       GRPC_GO_LOG_VERBOSITY_LEVEL: 99
       GRPC_GO_LOG_SEVERITY_LEVEL: info
+
+  postgis:
+    image: postgis/postgis:16-3.4
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: "wfa"
+      POSTGRES_PASSWORD: "wfa"
+      POSTGRES_DB: "wfa"
+    volumes:
+      - postgis-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wfa -d wfa"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   lgtm:
     image: grafana/otel-lgtm
@@ -38,3 +63,6 @@ services:
       - GF_AUTH_ANONYMOUS_ENABLED=true
       - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
       - GF_AUTH_DISABLE_LOGIN_FORM=true
+
+volumes:
+  postgis-data:
