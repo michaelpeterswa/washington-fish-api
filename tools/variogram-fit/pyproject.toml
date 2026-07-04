@@ -1,0 +1,17 @@
+[project]
+name = "variogram-fit"
+version = "0.1.0"
+description = "Offline variogram fitting for the washington-fish-api KED weather interpolation"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pyproj>=3.6",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+]
+
+# This is the ONLY Python in the project; it runs offline to produce the two
+# frozen spherical variograms that internal/weather/field hardcodes. Run with:
+#   uv run fit.py

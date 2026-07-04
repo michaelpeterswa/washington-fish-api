@@ -13,3 +13,11 @@
 
 # Dependency directories (remove the comment below to include it)
 vendor/
+
+# Python tooling (tools/*)
+.venv/
+__pycache__/
+*.pyc
+
+# stray root-level viz outputs (committed reference renders live in docs/)
+tools/variogram-fit/*.png
