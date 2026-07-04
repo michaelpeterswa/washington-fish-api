@@ -49,7 +49,7 @@ func (s *Store) UpsertConditions(ctx context.Context, cs []Condition) error {
 			c.AirTempC, c.WaterTempC, c.PressureHpa, c.PressureTendency, c.WindMps, c.CloudPct)
 	}
 	br := s.Pool.SendBatch(ctx, b)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for range cs {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("store: upsert conditions batch: %w", err)

@@ -31,7 +31,7 @@ ON CONFLICT (source, external_id) DO UPDATE SET
 		b.Queue(q, st.Source, st.ExternalID, st.Lon, st.Lat, st.ElevM)
 	}
 	br := s.Pool.SendBatch(ctx, b)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for range sts {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("store: upsert stations: %w", err)
@@ -112,7 +112,7 @@ func (s *Store) UpdateLakeConfidences(ctx context.Context, cs []LakeConfidence) 
 		b.Queue(q, c.LakeID, c.Nowcast, c.Forecast)
 	}
 	br := s.Pool.SendBatch(ctx, b)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	for range cs {
 		if _, err := br.Exec(); err != nil {
 			return fmt.Errorf("store: update lake confidences: %w", err)

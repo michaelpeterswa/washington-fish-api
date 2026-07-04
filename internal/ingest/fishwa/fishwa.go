@@ -94,7 +94,7 @@ func fetchLayer(ctx context.Context, client *httpx.Client, base string, layer in
 			return nil, err
 		}
 		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("status %d", resp.StatusCode)
 		}

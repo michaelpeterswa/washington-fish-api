@@ -38,7 +38,7 @@ func TestDo_RetriesTransientThenSucceeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -60,7 +60,7 @@ func TestDo_PermanentStatusNotRetried(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 returned to caller", resp.StatusCode)
 	}
@@ -88,7 +88,7 @@ func TestDo_HonorsRetryAfter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if elapsed := time.Since(start); elapsed < 900*time.Millisecond {
 		t.Fatalf("waited %v, expected ~1s from Retry-After", elapsed)
 	}
@@ -103,7 +103,10 @@ func TestDo_ContextCancelStops(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	c := New(WithBackoff(20*time.Millisecond, 100*time.Millisecond), WithMaxElapsed(time.Hour))
-	_, err := c.Do(ctx, newReq(t, srv.URL))
+	resp, err := c.Do(ctx, newReq(t, srv.URL))
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected error on context cancel")
 	}
@@ -128,7 +131,7 @@ func TestDo_LogsRetries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Do: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	out := buf.String()
 	if !strings.Contains(out, "httpx retry") || !strings.Contains(out, "status 429") {

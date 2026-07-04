@@ -42,7 +42,7 @@ func (s *Store) UpsertPresenceFromPoints(ctx context.Context, pts []PresencePoin
 		b.Queue(upsertPresenceNearestSQL, p.Species, p.Lon, p.Lat, maxMeters)
 	}
 	br := s.Pool.SendBatch(ctx, b)
-	defer br.Close()
+	defer func() { _ = br.Close() }()
 	matched := 0
 	for range pts {
 		tag, err := br.Exec()

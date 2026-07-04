@@ -98,7 +98,7 @@ func (c *Client) getJSON(ctx context.Context, url string, v any) error {
 	if err != nil {
 		return fmt.Errorf("stations: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 300))
 		return fmt.Errorf("stations: status %d: %s", resp.StatusCode, body)
