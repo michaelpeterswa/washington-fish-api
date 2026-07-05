@@ -64,7 +64,13 @@ LEFT JOIN LATERAL (
     FROM stocking_events se
     WHERE se.lake_id = l.id AND se.size_class IN ('legals', 'adult')
 ) cp ON TRUE
-LEFT JOIN conditions c ON c.lake_id = l.id AND c.horizon_h = 0
+LEFT JOIN LATERAL (
+    SELECT air_temp_c, water_temp_c, pressure_tendency, wind_mps, cloud_pct
+    FROM conditions
+    WHERE lake_id = l.id AND horizon_h = 0
+    ORDER BY valid_at DESC
+    LIMIT 1
+) c ON TRUE
 WHERE %s
 ORDER BY dist_km
 LIMIT %s`, pt, where, arg(limit))
