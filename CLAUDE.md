@@ -135,10 +135,50 @@ horizontal trend). x,y are centred+scaled inside Solve for conditioning.
   RateLimit-Reset, X-RateLimit-Reset epoch). Per-client backoff tuned via options
   (weather ramps to ~65s for Open-Meteo's minutely, header-less limit). No
   per-client retry loops.
-- Deployment: self-hosted k8s (Talos) homelab. ONE image, two entrypoints —
-  `wfa-api` (server Deployment) and `wfa-worker` (subcommand-dispatched pollers
-  run as k8s CronJobs; no in-process scheduler, no leader election).
+- Deployment: Fly.io + Neon (see ## Deployment). ONE image, two entrypoints —
+  `wfa-api` (server) and `wfa-worker` (subcommand-dispatched jobs); no
+  in-process scheduler, no leader election. (Was planned as self-hosted k8s /
+  Talos homelab; migrated to Fly + Neon 2026-07-04.)
 - Prefer standard-library-first, idiomatic Go.
+
+## Deployment (LIVE — runbook in deploy/README.md)
+Production is on Fly.io (org `personal`, region `sjc` — nearest current Fly
+region to WA; `sea` is retired). Two Fly apps, one image:
+- **`washington-fish-api`** — the server. `fly deploy --image-label latest`
+  (the `latest` label is REQUIRED — cron schedules reference
+  `registry.fly.io/washington-fish-api:latest`). `release_command =
+  "/wfa-worker migrate"` applies goose migrations on every deploy (idempotent).
+  2× HA machines, `/healthz` liveness, Prometheus scraped on `:8081`.
+- **`washington-fish-cron`** — Fly [cron-manager](https://github.com/fly-apps/cron-manager)
+  blueprint (single machine + SQLite volume). `deploy/cron-manager/schedules.json`
+  is BAKED INTO its image at deploy time. It spawns one-shot `/wfa-worker <job>`
+  machines *into* `washington-fish-api` (process group `cron`, auto-destroy), so
+  jobs INHERIT the API app's secrets — no separate DB wiring. Schedules:
+  stocking + weather hourly, lakes weekly, stations + fishwa monthly. Manual
+  run/seed: `fly ssh console -a washington-fish-cron -C 'cm jobs trigger <id>'`.
+  Auth: `FLY_API_TOKEN` = a 1-year DEPLOY token scoped to `washington-fish-api`
+  (`fly tokens create deploy` — NOT `fly auth token`, which is short-lived and
+  silently expires mid-run).
+
+DB: **Neon** Postgres/PostGIS, project `washington-fish`
+(`autumn-credit-66295829`), region `aws-us-east-1` (the Neon integration can't
+pick a region). `DATABASE_URL` is a Fly secret = the POOLED Neon endpoint
+(`-pooler` host). App (`sjc`) ↔ DB (us-east-1) is ~60ms/query; if `/v1/rank`
+latency bites, add a us-west-2 Neon read replica and route reads there.
+
+Image dispatch: the Dockerfile uses **`CMD ["/wfa-api"]`, NOT `ENTRYPOINT`** —
+Fly APPENDS `release_command` / cron `command` to any ENTRYPOINT, so an
+ENTRYPOINT would exec `/wfa-api /wfa-worker migrate` (server, hangs). CMD lets a
+supplied command replace it. Do not reintroduce ENTRYPOINT.
+
+Domain: **https://api.washington.fish** — Cloudflare-proxied (orange), SSL mode
+**Full (strict)** → Fly Let's Encrypt origin cert. The `_fly-ownership.api` TXT
+record MUST stay (Fly re-verifies ownership while proxied). Cert issuance needs
+the A/AAAA grey (DNS-only) FIRST so Fly's ACME challenge reaches `:443` directly,
+THEN flip to orange — proxying before the cert exists breaks issuance.
+
+Not yet done: Open-Meteo still hits the PUBLIC (non-commercial) endpoint —
+self-host and set `OPENMETEO_URL` before public launch.
 
 ## Package layout (target)
     cmd/wfa-api/            server: chi router, /healthz /readyz, :8081 metrics
