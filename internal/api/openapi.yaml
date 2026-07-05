@@ -1,0 +1,419 @@
+openapi: 3.1.0
+info:
+  title: Washington Fish API
+  version: "1.0.0"
+  description: >
+    Fishing-condition predictions for Washington freshwater lakes.
+    Every prediction returns a **score**, a **confidence** (data-coverage /
+    kriging variance, independent of the score), and a human-readable **why**.
+
+
+    Species presence comes from the WDFW stocking feed + FishWA per-species
+    layers. Bite likelihood is a transparent additive heuristic (each factor
+    emits a contribution + reason). Lake ranking is a query-time composite over
+    bite likelihood.
+
+
+    Regulations are intentionally NOT encoded — link out to WDFW.
+  license:
+    name: See repository LICENSE
+servers:
+  - url: https://api.washington.fish
+    description: Production
+  - url: http://localhost:8080
+    description: Local (docker-compose)
+
+tags:
+  - name: ops
+    description: Liveness / readiness probes.
+  - name: lakes
+    description: Lake search, detail, and species presence.
+  - name: predictions
+    description: Bite likelihood and lake ranking.
+
+paths:
+  /healthz:
+    get:
+      tags: [ops]
+      summary: Liveness probe
+      description: Process is up. Does not touch the database.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+              example: { status: ok }
+
+  /readyz:
+    get:
+      tags: [ops]
+      summary: Readiness probe
+      description: Reports whether dependencies (the database) are reachable.
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ready }
+              example: { status: ready }
+        "503":
+          description: A dependency is unavailable
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: unavailable }
+                  reason: { type: string, example: database }
+
+  /v1/lakes:
+    get:
+      tags: [lakes]
+      summary: Search lakes
+      description: >
+        Filter lakes by name, county, species presence, and/or type. Provide
+        `lat`+`lon` (optionally with `radius_km`) for a geographic search;
+        matching lakes then include `distance_km`.
+      parameters:
+        - name: q
+          in: query
+          description: Case-insensitive substring match on lake name.
+          schema: { type: string }
+          example: green
+        - name: county
+          in: query
+          schema: { type: string }
+          example: King
+        - name: species
+          in: query
+          description: >
+            Presence filter — an EXACT, case-insensitive match against the
+            stored species label (e.g. `Rainbow`, `Largemouth Bass`,
+            `Cutthroat`), NOT a catalog key like `rainbow_trout`. An
+            unrecognized value simply returns no lakes.
+          schema: { $ref: "#/components/schemas/SpeciesName" }
+          example: Rainbow
+        - name: lake_type
+          in: query
+          schema: { $ref: "#/components/schemas/LakeType" }
+        - name: lat
+          in: query
+          description: Origin latitude for a geographic search (pair with `lon`).
+          schema: { type: number, format: double }
+          example: 47.6
+        - name: lon
+          in: query
+          description: Origin longitude for a geographic search (pair with `lat`).
+          schema: { type: number, format: double }
+          example: -122.3
+        - name: radius_km
+          in: query
+          description: Search radius in km; only applies when `lat`+`lon` are set. 0 = no radius bound.
+          schema: { type: number, format: double, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, minimum: 1 }
+      responses:
+        "200":
+          description: Matching lakes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  lakes:
+                    type: array
+                    items: { $ref: "#/components/schemas/Lake" }
+
+  /v1/lakes/{id}:
+    get:
+      tags: [lakes]
+      summary: Lake detail
+      description: A single lake plus its species presence.
+      parameters:
+        - $ref: "#/components/parameters/LakeId"
+      responses:
+        "200":
+          description: Lake detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lake: { $ref: "#/components/schemas/Lake" }
+                  species:
+                    type: array
+                    items: { $ref: "#/components/schemas/Species" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/lakes/{id}/species:
+    get:
+      tags: [lakes]
+      summary: Lake species presence
+      parameters:
+        - $ref: "#/components/parameters/LakeId"
+      responses:
+        "200":
+          description: Species present in the lake
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lake_id: { type: integer, format: int64 }
+                  species:
+                    type: array
+                    items: { $ref: "#/components/schemas/Species" }
+
+  /v1/lakes/{id}/prediction:
+    get:
+      tags: [predictions]
+      summary: Bite prediction (nowcast + 72h forecast)
+      description: >
+        The core endpoint. Returns a nowcast plus an hourly forecast series
+        (horizons 1..72). Each point carries a score, confidence, and — for the
+        nowcast — the per-factor breakdown driving the score.
+      parameters:
+        - $ref: "#/components/parameters/LakeId"
+        - name: species
+          in: query
+          description: >
+            Thermal target — a species **catalog key** (e.g. `rainbow_trout`,
+            `smallmouth_bass`) whose comfort band drives the water-temp factor.
+            Unknown values fall back to the lake's primary present species
+            (no error). Note this differs from the `species` filter on
+            `/v1/lakes` and `/v1/rank`, which matches presence labels.
+          schema: { type: string }
+          example: rainbow_trout
+        - $ref: "#/components/parameters/Units"
+      responses:
+        "200":
+          description: Prediction
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Prediction" }
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /v1/rank:
+    get:
+      tags: [predictions]
+      summary: Rank lakes near a point
+      description: >
+        Scores candidate lakes within `radius_km` of the origin and returns them
+        sorted by bite score (ties broken by proximity). Optionally filter to a
+        species that must be present.
+      parameters:
+        - name: lat
+          in: query
+          required: true
+          schema: { type: number, format: double }
+          example: 47.6
+        - name: lon
+          in: query
+          required: true
+          schema: { type: number, format: double }
+          example: -122.3
+        - name: radius_km
+          in: query
+          schema: { type: number, format: double, default: 80 }
+        - name: species
+          in: query
+          description: >
+            Presence filter — EXACT, case-insensitive match on the stored
+            species label (e.g. `Rainbow`), not a catalog key. Unrecognized
+            values return zero results.
+          schema: { $ref: "#/components/schemas/SpeciesName" }
+          example: Rainbow
+        - name: limit
+          in: query
+          description: >
+            Max candidates scored (nearest-first before scoring). Clamped to
+            [1, 500]; values >500 reset to 100.
+          schema: { type: integer, default: 20 }
+        - $ref: "#/components/parameters/Units"
+      responses:
+        "200":
+          description: Ranked lakes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  origin:
+                    type: object
+                    properties:
+                      lat: { type: number, format: double }
+                      lon: { type: number, format: double }
+                  radius_km: { type: number, format: double }
+                  count: { type: integer }
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/RankResult" }
+        "400":
+          description: Missing required `lat`/`lon`
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+              example: { error: "lat and lon query params are required" }
+
+components:
+  parameters:
+    LakeId:
+      name: id
+      in: path
+      required: true
+      description: Lake identifier.
+      schema: { type: integer, format: int64 }
+      example: 1084
+    Units:
+      name: units
+      in: query
+      description: >
+        Temperature unit for temp-bearing fields and reasons. `f` = Fahrenheit,
+        `c`/`metric` = Celsius. Defaults to the server default (`f`). The score
+        is unit-invariant.
+      schema:
+        type: string
+        enum: [f, c, metric]
+
+  responses:
+    NotFound:
+      description: Lake not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: "lake not found" }
+
+  schemas:
+    LakeType:
+      type: string
+      enum: [lowland, high]
+      description: WDFW lake classification. Alpine (`high`) lakes are lower-confidence.
+
+    SpeciesName:
+      type: string
+      description: >
+        Stored species display label. Known values include Rainbow,
+        Largemouth Bass, Cutthroat, Yellow Perch, Black Crappie, Pumpkinseed,
+        Brown Bullhead, Bluegill, Brook Trout, Brown Trout, Kokanee,
+        Smallmouth Bass, Tiger Trout, Eastern Brook Trout, Walleye,
+        Tiger Muskie, Golden Trout.
+
+    Lake:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        geo_code: { type: [string, "null"], description: WDFW geo_code (join key). }
+        name: { type: string }
+        county: { type: [string, "null"] }
+        lake_type:
+          oneOf:
+            - $ref: "#/components/schemas/LakeType"
+            - type: "null"
+        lat: { type: [number, "null"], format: double }
+        lon: { type: [number, "null"], format: double }
+        area_m2: { type: [number, "null"], format: double }
+        elev_m: { type: [number, "null"], format: double }
+        depth_max_m: { type: [number, "null"], format: double }
+        depth_mean_m: { type: [number, "null"], format: double }
+        distance_km:
+          type: [number, "null"]
+          format: double
+          description: Present only on geographic search / rank results.
+      required: [id, name]
+
+    Species:
+      type: object
+      properties:
+        species: { type: string, example: Rainbow }
+        confidence: { type: number, format: double, example: 0.85 }
+        source:
+          type: string
+          enum: [fishwa, stocking]
+        updated_at: { type: string, format: date-time }
+      required: [species, confidence, source, updated_at]
+
+    Factor:
+      type: object
+      description: One additive contributor to the bite score, with its rationale.
+      properties:
+        name:
+          type: string
+          example: pressure
+          description: e.g. catchable_plant, pressure, wind, cloud, solunar, water_temp.
+        contribution:
+          type: number
+          format: double
+          description: Signed points this factor added to the score.
+          example: 10
+        reason:
+          type: string
+          example: "Barometer falling (-1.4 hPa/3h) — often triggers active feeding"
+      required: [name, contribution, reason]
+
+    NowcastPoint:
+      type: object
+      properties:
+        valid_at: { type: string, format: date-time }
+        score: { type: number, format: double, example: 70 }
+        confidence: { type: number, format: double, example: 0.932 }
+        water_temp:
+          type: [number, "null"]
+          format: double
+          description: Modeled water temperature in the requested unit.
+        factors:
+          type: array
+          items: { $ref: "#/components/schemas/Factor" }
+
+    ForecastPoint:
+      type: object
+      properties:
+        valid_at: { type: string, format: date-time }
+        horizon_h: { type: integer, description: Hours ahead (1..72). }
+        score: { type: number, format: double }
+        confidence: { type: number, format: double }
+
+    Prediction:
+      type: object
+      properties:
+        lake_id: { type: integer, format: int64 }
+        target_species:
+          type: [string, "null"]
+          description: Species whose thermal window was applied.
+        temp_unit: { type: string, enum: [F, C] }
+        days_since_catchable_plant: { type: [integer, "null"] }
+        last_plant_species: { type: [string, "null"] }
+        nowcast:
+          oneOf:
+            - $ref: "#/components/schemas/NowcastPoint"
+            - type: "null"
+        forecast:
+          type: array
+          items: { $ref: "#/components/schemas/ForecastPoint" }
+
+    RankResult:
+      type: object
+      properties:
+        lake: { $ref: "#/components/schemas/Lake" }
+        score: { type: number, format: double, example: 80 }
+        confidence: { type: number, format: double, example: 0.942 }
+        why:
+          type: string
+          description: The single highest-weight factor's reason.
+          example: "Recent catchable plant (4 days ago) — good numbers still present"
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+      required: [error]
