@@ -38,8 +38,16 @@ func NewRouter(s *Server) http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 
+	// Root: plain-text landing pointing at the docs.
+	r.Get("/", s.handleRoot)
+
 	// Readiness: dependencies (DB) reachable.
 	r.Get("/readyz", s.handleReady)
+
+	// API reference: Scalar-rendered docs at /docs over the embedded spec.
+	r.Get("/openapi.yaml", s.handleOpenAPISpec)
+	r.Get("/docs", s.handleDocs)
+	r.Get("/docs/scalar.js", s.handleScalarJS)
 
 	r.Route("/v1", func(r chi.Router) {
 		r.Get("/lakes", s.handleSearchLakes)
