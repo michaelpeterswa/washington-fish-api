@@ -53,6 +53,9 @@ func formatTemp(c float64, u TempUnit) string {
 	return fmt.Sprintf("%.0f%s", ConvertTemp(c, u), u.label())
 }
 
+// sq returns x², used throughout the smooth factor curves.
+func sq(x float64) float64 { return x * x }
+
 // Factor is one additive term in the score with its rationale.
 type Factor struct {
 	Name         string  `json:"name"`
@@ -209,8 +212,8 @@ func windFactor(wind *float64) *Factor {
 	}
 	w := *wind
 	mph := w * 2.2369363
-	bump := 8.0 * math.Exp(-math.Pow((w-3.5)/2.6, 2))
-	calm := -4.0 * math.Exp(-math.Pow(w/1.6, 2))
+	bump := 8.0 * math.Exp(-sq((w-3.5)/2.6))
+	calm := -4.0 * math.Exp(-sq(w/1.6))
 	gale := -0.9 * math.Max(0, w-6.0)
 	contribution := bump + calm + gale
 
@@ -317,7 +320,7 @@ func thermalFactor(th *Thermal, unit TempUnit) *Factor {
 	case w >= th.OptLo && w <= th.OptHi:
 		mid := (th.OptLo + th.OptHi) / 2
 		half := math.Max((th.OptHi-th.OptLo)/2, 0.1)
-		contribution = 10.0 - math.Pow((w-mid)/half, 2)
+		contribution = 10.0 - sq((w-mid)/half)
 		return &Factor{"water_temp", contribution, fmt.Sprintf("Water ~%s — in the ideal range for %s", temp, sp)}
 	default:
 		var d, margin float64
@@ -356,7 +359,7 @@ func morphometryFactor(m *Morphometry) *Factor {
 		// tapering for tiny ponds and large, dispersed waters. Bell in log-area.
 		ha := *m.AreaM2 / 10000.0
 		lp := math.Log10(math.Max(ha, 0.1))
-		contribution += 3.0 * math.Exp(-math.Pow((lp-math.Log10(20.0))/1.1, 2))
+		contribution += 3.0 * math.Exp(-sq((lp-math.Log10(20.0))/1.1))
 		switch {
 		case ha < 4:
 			bits = append(bits, "small water")
@@ -370,7 +373,7 @@ func morphometryFactor(m *Morphometry) *Factor {
 		// A moderate mean depth (~5 m) balances thermal refuge and productivity;
 		// very shallow (winterkill-prone) and very deep (unproductive) score lower.
 		d := *m.DepthMeanM
-		contribution += 2.0*math.Exp(-math.Pow((d-5.0)/6.0, 2)) - 0.5
+		contribution += 2.0*math.Exp(-sq((d-5.0)/6.0)) - 0.5
 		switch {
 		case d < 2.5:
 			bits = append(bits, "shallow")
