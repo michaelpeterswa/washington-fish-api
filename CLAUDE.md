@@ -5,6 +5,19 @@ carried over from a design conversation. Treat as current source of truth;
 update as decisions land. Keep this file high-signal — it's a behavioral
 contract, not documentation.
 
+## Status (last updated after PR #1 merged to main)
+DONE & verified: phases 1 (foundation), 2 (stocking + WDFW lake crawl), 3a
+(Open-Meteo weather), 3b-1 (KED confidence, with the [1,elev,x,y] drift fix +
+data-derived obs variogram), 4 (water-temp proxy + warmwater presence +
+species-aware thermal factor), 5 (bite heuristic + /v1 endpoints + rank), plus
+the solunar factor, the `?units=` temperature flag, and `internal/httpx` (shared
+retry client). Full test/vet/golangci-lint green; README rewritten.
+NOT yet done: 3b-2 (obs-VALUE bias correction — needs the Open-Meteo ARCHIVE
+backfill for a real residVariogram; forecast-bias open decision #1 goes live
+here), phase 6 (catch-log flywheel + warmwater PDFs), k8s deployment. Deferred:
+NHD polygon overlay, FishWA-bathymetry depth upgrade.
+See the phased build plan below for per-phase detail (items marked DONE).
+
 ## What we're building
 A public product predicting fishing conditions for WA lakes, delivered as an
 API that also backs a consumer app. The consumer app's catch-logging is the
