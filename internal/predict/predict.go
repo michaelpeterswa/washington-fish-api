@@ -97,6 +97,7 @@ func (s *Service) LakePrediction(ctx context.Context, lakeID int64, targetSpecie
 			CloudPct:                c.CloudPct,
 			Solunar:                 solunarFor(lake.Lat, lake.Lon, ref),
 			Thermal:                 thermalFor(sp, c.WaterTempC),
+			Morphometry:             morphometryFor(lake),
 			TempUnit:                unit,
 		})
 
@@ -146,6 +147,7 @@ func (s *Service) RankLakes(ctx context.Context, p store.RankParams, unit bite.T
 			CloudPct:                r.CloudPct,
 			Solunar:                 solunarFor(r.Lake.Lat, r.Lake.Lon, now),
 			Thermal:                 thermal,
+			Morphometry:             morphometryFor(&r.Lake),
 			TempUnit:                unit,
 		})
 		ranked = append(ranked, RankedLake{
@@ -156,15 +158,20 @@ func (s *Service) RankLakes(ctx context.Context, p store.RankParams, unit bite.T
 		})
 	}
 
+	// Sort by score; break ties deterministically by proximity, then higher
+	// confidence, then lake ID so equal-score lakes present in a stable order.
 	sort.SliceStable(ranked, func(i, j int) bool {
 		if ranked[i].Score != ranked[j].Score {
 			return ranked[i].Score > ranked[j].Score
 		}
 		di, dj := ranked[i].Lake.DistanceKm, ranked[j].Lake.DistanceKm
-		if di != nil && dj != nil {
+		if di != nil && dj != nil && *di != *dj {
 			return *di < *dj
 		}
-		return false
+		if ranked[i].Confidence != ranked[j].Confidence {
+			return ranked[i].Confidence > ranked[j].Confidence
+		}
+		return ranked[i].Lake.ID < ranked[j].Lake.ID
 	})
 	return ranked, nil
 }
@@ -194,6 +201,15 @@ func thermalFor(sp species.Species, water *float64) *bite.Thermal {
 		WaterTempC: *water, SpeciesName: sp.Canonical,
 		OptLo: sp.OptLo, OptHi: sp.OptHi, TolLo: sp.TolLo, TolHi: sp.TolHi,
 	}
+}
+
+// morphometryFor builds the intrinsic-shape input from a lake summary, or nil
+// if the lake has no morphometry at all.
+func morphometryFor(l *store.LakeSummary) *bite.Morphometry {
+	if l == nil || (l.AreaM2 == nil && l.DepthMeanM == nil && l.ElevM == nil) {
+		return nil
+	}
+	return &bite.Morphometry{AreaM2: l.AreaM2, DepthMeanM: l.DepthMeanM, ElevM: l.ElevM}
 }
 
 // solunarFor computes the solunar signal for a lake at instant t, or nil if the

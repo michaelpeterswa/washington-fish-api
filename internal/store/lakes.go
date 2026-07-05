@@ -71,18 +71,21 @@ WHERE area_m2 IS NOT NULL AND depth_mean_m IS NULL`
 	return tag.RowsAffected(), nil
 }
 
-// LakePoint is a lake's id + centroid coordinates (WGS84 lon/lat) + mean depth.
+// LakePoint is a lake's id + centroid coordinates (WGS84 lon/lat) + mean depth
+// + elevation. Elevation lets weather ingestion lapse-correct the grid air temp
+// down to the lake's true elevation.
 type LakePoint struct {
 	ID         int64
 	Lon        float64
 	Lat        float64
 	DepthMeanM *float64
+	ElevM      *float64
 }
 
 // LakesWithCentroid returns every lake that has a located centroid — the
 // candidate set for weather ingestion and prediction.
 func (s *Store) LakesWithCentroid(ctx context.Context) ([]LakePoint, error) {
-	const q = `SELECT id, ST_X(centroid), ST_Y(centroid), depth_mean_m
+	const q = `SELECT id, ST_X(centroid), ST_Y(centroid), depth_mean_m, elev_m
 	           FROM lakes WHERE centroid IS NOT NULL ORDER BY id`
 	rows, err := s.Pool.Query(ctx, q)
 	if err != nil {
@@ -93,7 +96,7 @@ func (s *Store) LakesWithCentroid(ctx context.Context) ([]LakePoint, error) {
 	var out []LakePoint
 	for rows.Next() {
 		var p LakePoint
-		if err := rows.Scan(&p.ID, &p.Lon, &p.Lat, &p.DepthMeanM); err != nil {
+		if err := rows.Scan(&p.ID, &p.Lon, &p.Lat, &p.DepthMeanM, &p.ElevM); err != nil {
 			return nil, fmt.Errorf("store: scan lake point: %w", err)
 		}
 		out = append(out, p)

@@ -139,6 +139,31 @@ func factorByName(fs []Factor, name string) *Factor {
 	return nil
 }
 
+func TestScore_MorphometryDifferentiatesUnderIdenticalWeather(t *testing.T) {
+	// Two unstocked lakes with identical weather but different shape must NOT
+	// score the same — this is the fix for clustered alpine lakes.
+	weather := Inputs{PressureTendency: ptrF(0), WindMps: ptrF(3.5), CloudPct: ptrF(20)}
+
+	small := weather
+	small.Morphometry = &Morphometry{AreaM2: ptrF(60000), DepthMeanM: ptrF(4), ElevM: ptrF(600)}
+	big := weather
+	big.Morphometry = &Morphometry{AreaM2: ptrF(9_000_000), DepthMeanM: ptrF(25), ElevM: ptrF(2000)}
+
+	if Score(small).Score == Score(big).Score {
+		t.Fatalf("distinct morphometry should yield distinct scores, both = %v", Score(small).Score)
+	}
+}
+
+func TestScore_WeatherFactorsAreContinuous(t *testing.T) {
+	// A 1 mph difference in wind used to fall in the same bucket (identical
+	// score). With smooth factors it must move the score.
+	a := Score(Inputs{WindMps: ptrF(3.0)})
+	b := Score(Inputs{WindMps: ptrF(4.0)})
+	if a.Score == b.Score {
+		t.Fatalf("continuous wind factor should distinguish 3 vs 4 m/s, both = %v", a.Score)
+	}
+}
+
 func TestScore_NeverBelowZeroOrAbove100(t *testing.T) {
 	hi := Score(Inputs{DaysSinceCatchablePlant: ptrI(0), PressureTendency: ptrF(-2), WindMps: ptrF(3), CloudPct: ptrF(100)})
 	if hi.Score > 100 {

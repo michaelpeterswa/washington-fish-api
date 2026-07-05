@@ -68,7 +68,7 @@ func Poll(ctx context.Context, c *config.Config, st *store.Store, logger *slog.L
 			if s, ok := seeds[l.ID]; ok {
 				seed = &s
 			}
-			conds = append(conds, buildConditions(l.ID, fcs[j], now, l.DepthMeanM, seed)...)
+			conds = append(conds, buildConditions(l.ID, fcs[j], now, l.DepthMeanM, l.ElevM, seed)...)
 		}
 		if err := st.UpsertConditions(ctx, conds); err != nil {
 			return err
@@ -90,11 +90,33 @@ func Poll(ctx context.Context, c *config.Config, st *store.Store, logger *slog.L
 	return nil
 }
 
+// lapseRateCPerM is the standard environmental temperature lapse rate: ~6.5 °C
+// of cooling per 1000 m of ascent.
+const lapseRateCPerM = 0.0065
+
 // buildConditions turns one Open-Meteo forecast into a nowcast row plus one row
 // per future hour (up to maxHorizon), with a 3-hour barometric tendency and a
 // depth-damped water-temperature proxy.
-func buildConditions(lakeID int64, f Forecast, now time.Time, depthM *float64, seed *store.WaterSeed) []store.Condition {
+//
+// Air temperature is first lapse-corrected from the model grid node's elevation
+// down to the lake's true elevation (lakeElevM). Neighbouring lakes that snap to
+// the same grid cell otherwise share an identical temperature; the correction
+// separates a valley lake from a ridge lake in the same cell — and, via the
+// water-temp EMA and the species thermal factor, gives them distinct scores.
+func buildConditions(lakeID int64, f Forecast, now time.Time, depthM, lakeElevM *float64, seed *store.WaterSeed) []store.Condition {
 	nowHour := now.Truncate(time.Hour)
+
+	// Temperature delta (°C) to add for the lake's elevation vs the grid node.
+	// f.Elevation is the model node elevation; higher lake -> negative delta.
+	var tempDelta float64
+	if lakeElevM != nil {
+		tempDelta = -lapseRateCPerM * (*lakeElevM - f.Elevation)
+	}
+	curTemp := offsetTemp(f.Current.TemperatureC, tempDelta)
+	hourlyTemp := make([]*float64, len(f.Hourly.TemperatureC))
+	for k := range f.Hourly.TemperatureC {
+		hourlyTemp[k] = offsetTemp(f.Hourly.TemperatureC[k], tempDelta)
+	}
 
 	// Index hourly pressure by time for tendency lookups.
 	pressureAt := make(map[time.Time]*float64, len(f.Hourly.Time))
@@ -110,11 +132,12 @@ func buildConditions(lakeID int64, f Forecast, now time.Time, depthM *float64, s
 		}
 	}
 
-	// Water temperature: an exponential moving average of the air-temp series,
-	// with a time constant that grows with depth (thermal inertia). Continues
-	// from the prior stored value (seed) when available, so only a short bridge
-	// of history is needed; otherwise it spins up from the fetched window.
-	waterAt := waterTempSeries(times, f.Hourly.TemperatureC, depthM, seed)
+	// Water temperature: an exponential moving average of the (lapse-corrected)
+	// air-temp series, with a time constant that grows with depth (thermal
+	// inertia). Continues from the prior stored value (seed) when available, so
+	// only a short bridge of history is needed; otherwise it spins up from the
+	// fetched window.
+	waterAt := waterTempSeries(times, hourlyTemp, depthM, seed)
 
 	var out []store.Condition
 
@@ -124,7 +147,7 @@ func buildConditions(lakeID int64, f Forecast, now time.Time, depthM *float64, s
 		LakeID:           lakeID,
 		ValidAt:          nowHour,
 		HorizonH:         0,
-		AirTempC:         f.Current.TemperatureC,
+		AirTempC:         curTemp,
 		WaterTempC:       waterAt[nowHour],
 		PressureHpa:      f.Current.SurfacePressure,
 		PressureTendency: ptrDiff(f.Current.SurfacePressure, pressureAt[nowHour.Add(-tendencyLag)]),
@@ -145,7 +168,7 @@ func buildConditions(lakeID int64, f Forecast, now time.Time, depthM *float64, s
 			LakeID:           lakeID,
 			ValidAt:          t,
 			HorizonH:         horizon,
-			AirTempC:         at(f.Hourly.TemperatureC, k),
+			AirTempC:         at(hourlyTemp, k),
 			WaterTempC:       waterAt[t],
 			PressureHpa:      at(f.Hourly.SurfacePressure, k),
 			PressureTendency: ptrDiff(at(f.Hourly.SurfacePressure, k), pressureAt[t.Add(-tendencyLag)]),
@@ -154,6 +177,15 @@ func buildConditions(lakeID int64, f Forecast, now time.Time, depthM *float64, s
 		})
 	}
 	return out
+}
+
+// offsetTemp returns a new pointer to *t + delta, or nil if t is nil.
+func offsetTemp(t *float64, delta float64) *float64 {
+	if t == nil {
+		return nil
+	}
+	v := *t + delta
+	return &v
 }
 
 // waterTempSeries models water temperature as an exponential moving average of

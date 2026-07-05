@@ -217,6 +217,22 @@ horizontal trend). x,y are centred+scaled inside Solve for conditioning.
    amplified; via internal/astro). Forecast scores now oscillate with
    time-of-day (verified: dusk/dawn peaks, ~41-pt swing over 72h). Phase 4 added
    the species-aware water-temp factor (see phase 4). All v1 bite factors now in.
+   ANTI-CLUSTERING (2026-07-05): nearby unstocked lakes (esp. alpine) collapsed
+   onto one score (live check: 100 rank rows → 2 distinct scores). Three causes,
+   all addressed: (a) every weather factor was a STEP function that quantized
+   real input variation away — pressure/wind/cloud/thermal are now CONTINUOUS
+   curves (tanh/Gaussian/linear) and per-factor math.Round is gone; (b) the only
+   high-dynamic-range factor (catchable_plant) is 0 across all unstocked lakes —
+   added a MORPHOMETRY factor (area/depth/elev, ±~5) that varies lake-to-lake
+   even under identical weather; (c) grid-snapping gave neighbours identical
+   temps — weather ingest now LAPSE-CORRECTS air temp (6.5°C/km) from the
+   Open-Meteo grid-node elevation to the lake's true elevation before the
+   water-temp EMA. Verified: 74 alpine lakes under IDENTICAL weather now spread
+   over 26 distinct scores (largest cluster 6, was 74). Do NOT re-quantize the
+   factors or re-add rounding — the smoothness IS the fix, and no random jitter
+   was added (fake variance would be dishonest). Also fixed a /v1/rank JOIN
+   fan-out (LEFT JOIN conditions matched all horizon-0 rows per lake → duplicate
+   rows, 100 rows = 74 lakes; now a LATERAL picks the latest valid_at).
 6. Flywheel + warmwater — catch-log intake (effort mandatory); PDF extraction.
 
 ## Decisions (resolved)
