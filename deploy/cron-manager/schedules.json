@@ -1,0 +1,87 @@
+[
+  {
+    "name": "stocking",
+    "app_name": "washington-fish-api",
+    "schedule": "0 * * * *",
+    "region": "sjc",
+    "command": "/wfa-worker stocking",
+    "command_timeout": 300,
+    "enabled": true,
+    "config": {
+      "metadata": { "fly_process_group": "cron" },
+      "auto_destroy": true,
+      "disable_machine_autostart": true,
+      "guest": { "cpu_kind": "shared", "cpus": 1, "memory_mb": 512 },
+      "image": "registry.fly.io/washington-fish-api:latest",
+      "restart": { "policy": "no", "max_retries": 1 }
+    }
+  },
+  {
+    "name": "weather",
+    "app_name": "washington-fish-api",
+    "schedule": "20 * * * *",
+    "region": "sjc",
+    "command": "/wfa-worker weather",
+    "command_timeout": 1200,
+    "enabled": true,
+    "config": {
+      "metadata": { "fly_process_group": "cron" },
+      "auto_destroy": true,
+      "disable_machine_autostart": true,
+      "guest": { "cpu_kind": "shared", "cpus": 1, "memory_mb": 512 },
+      "image": "registry.fly.io/washington-fish-api:latest",
+      "restart": { "policy": "no", "max_retries": 1 }
+    }
+  },
+  {
+    "name": "lakes",
+    "app_name": "washington-fish-api",
+    "schedule": "0 9 * * 1",
+    "region": "sjc",
+    "command": "/wfa-worker lakes",
+    "command_timeout": 2400,
+    "enabled": true,
+    "config": {
+      "metadata": { "fly_process_group": "cron" },
+      "auto_destroy": true,
+      "disable_machine_autostart": true,
+      "guest": { "cpu_kind": "shared", "cpus": 1, "memory_mb": 1024 },
+      "image": "registry.fly.io/washington-fish-api:latest",
+      "restart": { "policy": "no", "max_retries": 1 }
+    }
+  },
+  {
+    "name": "stations",
+    "app_name": "washington-fish-api",
+    "schedule": "0 8 1 * *",
+    "region": "sjc",
+    "command": "/wfa-worker stations",
+    "command_timeout": 900,
+    "enabled": true,
+    "config": {
+      "metadata": { "fly_process_group": "cron" },
+      "auto_destroy": true,
+      "disable_machine_autostart": true,
+      "guest": { "cpu_kind": "shared", "cpus": 1, "memory_mb": 512 },
+      "image": "registry.fly.io/washington-fish-api:latest",
+      "restart": { "policy": "no", "max_retries": 1 }
+    }
+  },
+  {
+    "name": "fishwa",
+    "app_name": "washington-fish-api",
+    "schedule": "0 10 1 * *",
+    "region": "sjc",
+    "command": "/wfa-worker fishwa",
+    "command_timeout": 900,
+    "enabled": true,
+    "config": {
+      "metadata": { "fly_process_group": "cron" },
+      "auto_destroy": true,
+      "disable_machine_autostart": true,
+      "guest": { "cpu_kind": "shared", "cpus": 1, "memory_mb": 512 },
+      "image": "registry.fly.io/washington-fish-api:latest",
+      "restart": { "policy": "no", "max_retries": 1 }
+    }
+  }
+]

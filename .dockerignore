@@ -1,0 +1,32 @@
+# Keep the Fly/Docker build context small and reproducible. The Dockerfile does
+# `COPY . .` then builds from source, so it only needs Go sources + go.mod/sum.
+.git
+.github
+.githooks
+.claude
+
+# Local/dev-only
+docker-compose.yml
+docker/
+deploy/
+tools/
+offline/
+*.md
+!go.mod
+!go.sum
+
+# Python tooling (tools/*, offline/*)
+.venv/
+__pycache__/
+*.pyc
+
+# Editor / OS cruft
+.DS_Store
+.idea/
+.vscode/
+
+# Build artifacts
+vendor/
+*.test
+*.out
+*.png

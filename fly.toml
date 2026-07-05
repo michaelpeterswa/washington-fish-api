@@ -1,0 +1,76 @@
+# fly.toml — Washington Fish API (public HTTP server, wfa-api).
+#
+# One image, two entrypoints (mirrors the k8s Deployment + CronJob split):
+#   - THIS app runs `/wfa-api` (the ENTRYPOINT baked into the image).
+#   - Ingestion jobs run as one-shot Machines spawned by the cron-manager app
+#     (see deploy/cron-manager/), which run `/wfa-worker <job>`. Those Machines
+#     are provisioned INTO this app, so they inherit this app's secrets
+#     (DATABASE_URL, SOCRATA_APP_TOKEN, ...) with no extra wiring.
+#
+# Region: sjc (San Jose) — the nearest CURRENT Fly region to WA users ("sea"
+# Seattle is no longer in Fly's region list). The Neon DB is in aws-us-east-1
+# (the Neon integration can't pick a region); if the rank endpoint feels slow,
+# add a us-west-2 Neon read replica (near sjc) and point read traffic at it. See
+# deploy/README.md.
+
+app = "washington-fish-api"
+primary_region = "sjc"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[deploy]
+  # Apply pending goose migrations before each release cuts over. Idempotent:
+  # a no-op once the schema is current. Runs `/wfa-worker migrate` against
+  # DATABASE_URL (set via `fly secrets`).
+  release_command = "/wfa-worker migrate"
+  strategy = "rolling"
+
+[env]
+  LOG_LEVEL = "info"
+  TEMP_UNIT = "f"
+  API_PORT = "8080"
+  METRICS_ENABLED = "true"
+  METRICS_PORT = "8081"
+  # LOCAL=false => ootel exports Prometheus on :8081/metrics (scraped by Fly
+  # below). LOCAL=true would switch metrics to OTLP/gRPC (compose/dev only).
+  LOCAL = "false"
+  TRACING_ENABLED = "false"
+  # Open-Meteo: the PUBLIC api.open-meteo.com is NON-COMMERCIAL. Before real
+  # launch, self-host the AGPL Open-Meteo server and set this to it (secret or
+  # env). Default (unset) falls back to the public endpoint — fine for staging.
+  # OPENMETEO_URL = "https://<self-hosted-open-meteo>/v1/forecast"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  # Liveness. /healthz is a static 200 (does NOT touch the DB), so a transient
+  # Neon blip won't yank every machine out of rotation and self-inflict an
+  # outage — machines return 503 on their own when the DB is down. /readyz
+  # (DB-backed) exists for manual/orchestration checks.
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "10s"
+
+# Fly's managed Prometheus scrapes the ootel exporter over the private 6PN
+# network — the metrics port is never publicly exposed.
+[[metrics]]
+  port = 8081
+  path = "/metrics"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
