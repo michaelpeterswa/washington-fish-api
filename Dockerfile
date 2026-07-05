@@ -18,6 +18,11 @@ FROM gcr.io/distroless/static-debian12:latest AS stage-final
 COPY --from=stage-compile /out/wfa-api /wfa-api
 COPY --from=stage-compile /out/wfa-worker /wfa-worker
 
-# Default to the API server; the worker CronJob overrides command to
-# ["/wfa-worker", "<job>"].
-ENTRYPOINT ["/wfa-api"]
+# CMD (not ENTRYPOINT) so a supplied command REPLACES the default instead of
+# appending to it. Default run is the API server; overriders run a worker:
+#   - Fly release_command: "/wfa-worker migrate"
+#   - Fly cron-manager machines: "/wfa-worker <job>"
+#   - k8s CronJob: command: ["/wfa-worker", "<job>"]
+# With an ENTRYPOINT, Fly would exec `/wfa-api /wfa-worker migrate` (args are
+# appended), which just starts the server and hangs the release step.
+CMD ["/wfa-api"]
